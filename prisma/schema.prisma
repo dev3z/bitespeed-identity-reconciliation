@@ -12,16 +12,14 @@ model Contact {
   phoneNumber     String?
   email           String?
   linkedId        Int?
-  linkPrecedence  String    // 'primary' or 'secondary'
+  linkPrecedence  String
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   deletedAt       DateTime?
   
-  // Self-relation for linking contacts
   linkedContact   Contact?  @relation("ContactLinks", fields: [linkedId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   linkedContacts  Contact[] @relation("ContactLinks")
   
-  // Indexes for fast lookups
   @@index([email])
   @@index([phoneNumber])
   @@index([linkedId])

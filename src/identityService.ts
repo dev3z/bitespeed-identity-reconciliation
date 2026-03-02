@@ -16,7 +16,6 @@ export async function identifyContact(
   phoneNumber?: string
 ): Promise<IdentifyResponse> {
   
-  // Step 1: Find all matching contacts
   const matches = await prisma.contact.findMany({
     where: {
       OR: [
@@ -30,15 +29,11 @@ export async function identifyContact(
     },
   });
 
-  // Step 2: Build contact families (get all related contacts)
   const allRelatedContacts = await getAllRelatedContacts(matches);
 
-  // Step 3: Get unique primary contacts
   const primaries = getUniquePrimaries(allRelatedContacts);
 
-  // Step 4: Decision tree based on number of primaries found
   if (primaries.length === 0) {
-    // No existing contact - create new primary
     const newContact = await prisma.contact.create({
       data: {
         email,
@@ -50,13 +45,11 @@ export async function identifyContact(
   }
 
   if (primaries.length === 1) {
-    // One family found
     const primary = primaries[0];
     const family = allRelatedContacts.filter(
       c => c.id === primary.id || c.linkedId === primary.id
     );
 
-    // Check if we need to create a new secondary
     const needsNewSecondary = shouldCreateSecondary(family, email, phoneNumber);
     
     if (needsNewSecondary) {
@@ -74,11 +67,9 @@ export async function identifyContact(
     return buildResponse(family);
   }
 
-  // Multiple primaries found - need to merge
   return await mergePrimaries(primaries, allRelatedContacts, email, phoneNumber);
 }
 
-// Helper: Get all contacts in the same family
 async function getAllRelatedContacts(matches: Contact[]): Promise<Contact[]> {
   if (matches.length === 0) return [];
 
@@ -93,7 +84,6 @@ async function getAllRelatedContacts(matches: Contact[]): Promise<Contact[]> {
     processed.add(contact.id);
     contactIds.add(contact.id);
 
-    // Find primary if this is secondary
     if (contact.linkedId) {
       const primary = await prisma.contact.findUnique({
         where: { id: contact.linkedId },
@@ -103,7 +93,6 @@ async function getAllRelatedContacts(matches: Contact[]): Promise<Contact[]> {
       }
     }
 
-    // Find all secondaries if this is primary
     if (contact.linkPrecedence === 'primary') {
       const secondaries = await prisma.contact.findMany({
         where: { linkedId: contact.id, deletedAt: null },
@@ -114,7 +103,6 @@ async function getAllRelatedContacts(matches: Contact[]): Promise<Contact[]> {
     }
   }
 
-  // Fetch all related contacts
   return await prisma.contact.findMany({
     where: {
       id: { in: Array.from(contactIds) },
@@ -128,7 +116,6 @@ async function getAllRelatedContacts(matches: Contact[]): Promise<Contact[]> {
 function getUniquePrimaries(contacts: Contact[]): Contact[] {
   const primaryMap = new Map<number, Contact>();
   
-  contacts.forEach(contact => {
     if (contact.linkPrecedence === 'primary') {
       primaryMap.set(contact.id, contact);
     }
@@ -139,36 +126,30 @@ function getUniquePrimaries(contacts: Contact[]): Contact[] {
   );
 }
 
-// Helper: Check if we need to create a new secondary
 function shouldCreateSecondary(
   family: Contact[],
   email?: string,
   phoneNumber?: string
 ): boolean {
-  // Don't create if this exact combination exists
   const exactMatch = family.some(
     c => c.email === email && c.phoneNumber === phoneNumber
   );
   
   if (exactMatch) return false;
 
-  // Create secondary if we have new information
   const hasEmail = family.some(c => c.email === email);
   const hasPhone = family.some(c => c.phoneNumber === phoneNumber);
 
-  // If both are provided and at least one is new, create secondary
   if (email && phoneNumber) {
     return !hasEmail || !hasPhone;
   }
 
-  // If only one is provided and it's new, create secondary
   if (email && !hasEmail) return true;
   if (phoneNumber && !hasPhone) return true;
 
   return false;
 }
 
-// Helper: Merge multiple primary contacts
 async function mergePrimaries(
   primaries: Contact[],
   allContacts: Contact[],
@@ -176,16 +157,13 @@ async function mergePrimaries(
   phoneNumber?: string
 ): Promise<IdentifyResponse> {
   
-  // Find the oldest primary (this becomes the main primary)
   const oldestPrimary = primaries.reduce((oldest, current) =>
     current.createdAt < oldest.createdAt ? current : oldest
   );
 
-  // Convert all other primaries to secondary
   const otherPrimaries = primaries.filter(p => p.id !== oldestPrimary.id);
 
   for (const primary of otherPrimaries) {
-    // Update the primary to become secondary
     await prisma.contact.update({
       where: { id: primary.id },
       data: {
@@ -195,14 +173,12 @@ async function mergePrimaries(
       },
     });
 
-    // Update all its children to point to the oldest primary
     await prisma.contact.updateMany({
       where: { linkedId: primary.id },
       data: { linkedId: oldestPrimary.id },
     });
   }
 
-  // Fetch updated family
   const updatedFamily = await prisma.contact.findMany({
     where: {
       OR: [
@@ -214,7 +190,6 @@ async function mergePrimaries(
     orderBy: { createdAt: 'asc' },
   });
 
-  // Check if we need to create a new secondary for this combo
   const needsNewSecondary = shouldCreateSecondary(updatedFamily, email, phoneNumber);
   
   if (needsNewSecondary) {
@@ -232,12 +207,10 @@ async function mergePrimaries(
   return buildResponse(updatedFamily);
 }
 
-// Helper: Build the final response
 function buildResponse(contacts: Contact[]): IdentifyResponse {
   const primary = contacts.find(c => c.linkPrecedence === 'primary')!;
   const secondaries = contacts.filter(c => c.linkPrecedence === 'secondary');
 
-  // Collect unique emails (primary first)
   const emails: string[] = [];
   if (primary.email) emails.push(primary.email);
   secondaries.forEach(c => {
@@ -246,7 +219,6 @@ function buildResponse(contacts: Contact[]): IdentifyResponse {
     }
   });
 
-  // Collect unique phone numbers (primary first)
   const phoneNumbers: string[] = [];
   if (primary.phoneNumber) phoneNumbers.push(primary.phoneNumber);
   secondaries.forEach(c => {
